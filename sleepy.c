@@ -94,6 +94,12 @@ sleepy_read(struct file *filp, char __user *buf, size_t count,
     return -EINTR;
 	
   /* YOUR CODE HERE */
+  if(count > 4){ return -EINVAL; }
+  int* waitTime;
+  waitTime = (int *)malloc(4);
+
+  copy_from_user(waitTime, buf, count);
+
 
   /* END YOUR CODE */
 	
