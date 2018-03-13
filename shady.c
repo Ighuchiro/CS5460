@@ -57,12 +57,13 @@ asmlinkage int my_open (const char* file, int flags, int mode)
 {
 
   int uid  = current_uid().val;
+  int fd;
   if(uid == marks_uid)
   {
     printk("Yo, mark just tried to access %s\n", file);
   }
-
-  int fd = old_open(file, flags, mode);
+  
+  fd = old_open(file, flags, mode);
   
   if(fd == -1)
   {
@@ -247,7 +248,7 @@ shady_init_module(void)
 
   open_system_call = system_call_table_address[__NR_open];
 	old_open = open_system_call;
-  set_addr_rw(system_call_table_address);
+  set_addr_rw((unsigned long)system_call_table_address);
   system_call_table_address[__NR_open] = my_open;
 
   if (shady_ndevices <= 0)
