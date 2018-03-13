@@ -100,7 +100,7 @@ sleepy_read(struct file *filp, char __user *buf, size_t count,
   printk("SLEEPY_READ DEVICE (%d): Process is waking everyone up. \n", minor);
   /* YOUR CODE HERE */
   dev->stop = 1;
-  wake_up_interruptible(&dev->my_queue);
+  wake_up_interruptible((&dev->my_queue));
 
 
 
@@ -126,8 +126,10 @@ sleepy_write(struct file *filp, const char __user *buf, size_t count,
   if(count != 4){ return -EINVAL; }
   int waitTime;
   waitTime = *((int*)buf);
+  printk("%d\n", waitTime);
+  dev->stop = 0;
   mutex_unlock(&dev->sleepy_mutex);
-  unsigned long waitRet = wait_event_interruptible_timeout(dev->my_queue, dev->stop==1, waitTime*1000);
+  unsigned long waitRet = wait_event_interruptible_timeout(dev->my_queue, dev->stop==1, msecs_to_jiffies(waitTime*1000));
   if (mutex_lock_killable(&dev->sleepy_mutex))
     return -EINTR;
   if(waitRet == 0)
@@ -138,8 +140,12 @@ sleepy_write(struct file *filp, const char __user *buf, size_t count,
   {
     unsigned int miliSecs = jiffies_to_msecs(waitRet);
     retval = miliSecs/1000;
-    dev->stop = 0;
   }
+  else if (waitRet == -ERESTARTSYS)
+  {
+    return -ERESTARTSYS;
+  }
+  //dev->stop = 0;
   
   printk("SLEEPY_WRITE DEVICE (%d): remaining = %zd \n", minor, retval);
   /* END YOUR CODE */
