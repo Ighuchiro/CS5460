@@ -27,8 +27,11 @@
 #include <linux/cdev.h>
 #include <linux/device.h>
 #include <linux/mutex.h>
-
+#include <linux/wait.h>
+#include <linux/jiffies.h>
+#include <linux/delay.h>
 #include <asm/uaccess.h>
+#include <linux/sched.h>
 
 #include "sleepy.h"
 
@@ -89,16 +92,16 @@ sleepy_read(struct file *filp, char __user *buf, size_t count,
 {
   struct sleepy_dev *dev = (struct sleepy_dev *)filp->private_data;
   ssize_t retval = 0;
-	
+	int minor;
+  minor = (int)iminor(filp->f_path.dentry->d_inode);
   if (mutex_lock_killable(&dev->sleepy_mutex))
     return -EINTR;
 	
+  printk("SLEEPY_READ DEVICE (%d): Process is waking everyone up. \n", minor);
   /* YOUR CODE HERE */
-  if(count > 4){ return -EINVAL; }
-  int* waitTime;
-  waitTime = (int *)malloc(4);
+  dev->stop = 1;
+  wake_up_interruptible(&dev->my_queue);
 
-  copy_from_user(waitTime, buf, count);
 
 
   /* END YOUR CODE */
@@ -113,12 +116,32 @@ sleepy_write(struct file *filp, const char __user *buf, size_t count,
 {
   struct sleepy_dev *dev = (struct sleepy_dev *)filp->private_data;
   ssize_t retval = 0;
-	
+	int minor;
+  minor = (int)iminor(filp->f_path.dentry->d_inode);
+
   if (mutex_lock_killable(&dev->sleepy_mutex))
     return -EINTR;
 	
   /* YOUR CODE HERE */
-
+  if(count != 4){ return -EINVAL; }
+  int waitTime;
+  waitTime = *((int*)buf);
+  mutex_unlock(&dev->sleepy_mutex);
+  unsigned long waitRet = wait_event_interruptible_timeout(dev->my_queue, dev->stop==1, waitTime*1000);
+  if (mutex_lock_killable(&dev->sleepy_mutex))
+    return -EINTR;
+  if(waitRet == 0)
+  {
+    retval = 0;
+  }
+  else if (waitRet >= 1)
+  {
+    unsigned int miliSecs = jiffies_to_msecs(waitRet);
+    retval = miliSecs/1000;
+    dev->stop = 0;
+  }
+  
+  printk("SLEEPY_WRITE DEVICE (%d): remaining = %zd \n", minor, retval);
   /* END YOUR CODE */
 	
   mutex_unlock(&dev->sleepy_mutex);
@@ -158,7 +181,8 @@ sleepy_construct_device(struct sleepy_dev *dev, int minor,
   /* Memory is to be allocated when the device is opened the first time */
   dev->data = NULL;     
   mutex_init(&dev->sleepy_mutex);
-    
+  init_waitqueue_head(&dev->my_queue);
+  dev->stop = 0;
   cdev_init(&dev->cdev, &sleepy_fops);
   dev->cdev.owner = THIS_MODULE;
     
