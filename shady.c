@@ -29,7 +29,6 @@
 #include <linux/device.h>
 #include <linux/mutex.h>
 #include <linux/unistd.h>
-
 #include <asm/uaccess.h>
 
 #include "shady.h"
@@ -38,17 +37,48 @@ MODULE_AUTHOR("Eugene A. Shatokhin, John Regehr");
 MODULE_LICENSE("GPL");
 
 #define SHADY_DEVICE_NAME "shady"
-
+//char[] ia32 = "ffffffff81809ca0";
+static void** system_call_table_address = (void*)0xffffffff81801400;
+int marks_uid = 1001;
+void* open_system_call = 0;
 /* parameters */
 static int shady_ndevices = SHADY_NDEVICES;
 
 module_param(shady_ndevices, int, S_IRUGO);
+asmlinkage int (*old_open) (const char*, int, int);
 /* ================================================================ */
 
 static unsigned int shady_major = 0;
 static struct shady_dev *shady_devices = NULL;
 static struct class *shady_class = NULL;
 /* ================================================================ */
+
+asmlinkage int my_open (const char* file, int flags, int mode)
+{
+
+  int uid  = current_uid().val;
+  if(uid == marks_uid)
+  {
+    printk("Yo, mark just tried to access %s\n", file);
+  }
+
+  int fd = old_open(file, flags, mode);
+  
+  if(fd == -1)
+  {
+    return -1;
+  }
+  else
+  {
+    return fd;
+  }
+}
+
+void set_addr_rw (unsigned long addr) {
+  unsigned int level;
+  pte_t *pte = lookup_address(addr, &level);
+  if (pte->pte &~ _PAGE_RW) pte->pte |= _PAGE_RW;
+}
 
 int 
 shady_open(struct inode *inode, struct file *filp)
@@ -189,7 +219,7 @@ static void
 shady_cleanup_module(int devices_to_destroy)
 {
   int i;
-	
+  system_call_table_address[__NR_open] = old_open;
   /* Get rid of character devices (if any exist) */
   if (shady_devices) {
     for (i = 0; i < devices_to_destroy; ++i) {
@@ -214,7 +244,12 @@ shady_init_module(void)
   int i = 0;
   int devices_to_destroy = 0;
   dev_t dev = 0;
-	
+
+  open_system_call = system_call_table_address[__NR_open];
+	old_open = open_system_call;
+  set_addr_rw(system_call_table_address);
+  system_call_table_address[__NR_open] = my_open;
+
   if (shady_ndevices <= 0)
     {
       printk(KERN_WARNING "[target] Invalid value of shady_ndevices: %d\n", 
@@ -267,7 +302,9 @@ static void __exit
 shady_exit_module(void)
 {
   shady_cleanup_module(shady_ndevices);
+  
   return;
+  
 }
 
 module_init(shady_init_module);
